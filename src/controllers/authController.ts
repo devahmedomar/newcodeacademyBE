@@ -58,7 +58,7 @@ export async function register(req: AuthRequest, res: Response) {
     });
   } catch (err) {
     console.error("register error:", err);
-    return res.status(500).json({ message: "Server error", detail: (err as Error).message });
+    return res.status(500).json({ message: "Server error" });
   }
 }
 

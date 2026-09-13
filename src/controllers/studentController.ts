@@ -33,6 +33,7 @@ export async function profile(req: AuthRequest, res: Response) {
     res.json({
       user: {
         id: user.id,
+        _id: user.id,
         name: user.name,
         email: user.email,
         enrollmentDate: user.enrollmentDate,
