@@ -9,22 +9,7 @@ import { User } from "./models/User";
 
 const app = express();
 
-const corsOrigins =
-  process.env.CORS_ORIGINS?.split(",")
-    .map((o) => o.trim())
-    .filter(Boolean) ?? [];
-const DEV_ORIGINS = ["http://localhost:4200", "http://localhost:4201"];
-
-app.use(
-  cors({
-    origin(origin, cb) {
-      // Allow non-browser requests (curl, server-to-server) and everything when no list is configured.
-      if (!origin || corsOrigins.length === 0) return cb(null, true);
-      if (corsOrigins.includes(origin) || DEV_ORIGINS.includes(origin)) return cb(null, true);
-      return cb(null, false);
-    },
-  })
-);
+app.use(cors({ origin: true }));
 app.use(express.json());
 
 app.get("/health", async (_req, res) => {
