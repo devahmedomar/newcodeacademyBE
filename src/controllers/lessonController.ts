@@ -1,5 +1,6 @@
 import { Response } from "express";
 import { Lesson, extractYoutubeId } from "../models/Lesson";
+import { Quiz } from "../models/Quiz";
 import { AuthRequest } from "../middleware/auth";
 import { connectDB } from "../config/db";
 
@@ -7,8 +8,12 @@ export async function list(req: AuthRequest, res: Response) {
   try {
     await connectDB();
     const q = req.user!.role === "teacher" ? {} : { published: true };
-    const lessons = await Lesson.find(q).sort({ module: 1, order: 1 });
-    res.json(lessons);
+    const lessons = await Lesson.find(q).sort({ module: 1, order: 1 }).lean();
+    const quizzes = await Quiz.find({ lessonId: { $in: lessons.map((l) => l._id) } })
+      .select("lessonId")
+      .lean();
+    const quizSet = new Set(quizzes.map((z) => String(z.lessonId)));
+    res.json(lessons.map((l) => ({ ...l, hasQuiz: quizSet.has(String(l._id)) })));
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
