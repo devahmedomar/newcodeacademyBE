@@ -78,6 +78,34 @@ export async function profile(req: AuthRequest, res: Response) {
         };
       });
 
+    const bestByQuiz = new Map<string, (typeof attempts)[number]>();
+    for (const a of attempts) {
+      const cur = bestByQuiz.get(a.quizId);
+      if (!cur || a.score > cur.score) bestByQuiz.set(a.quizId, a);
+    }
+    const quizBestAttempts = [...bestByQuiz.values()].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    const quizEarned = quizBestAttempts.reduce((s, a) => s + a.score, 0);
+    const quizPossible = quizBestAttempts.reduce((s, a) => s + a.total, 0);
+    const hwEarned = homeworks.reduce((s, h) => s + h.points, 0);
+    const hwPossible = homeworks.reduce((s, h) => s + h.maxPoints, 0);
+    const examEarned = exams.reduce((s, e) => s + e.grade, 0);
+    const examPossible = exams.reduce((s, e) => s + e.maxGrade, 0);
+    const totalEarned = quizEarned + hwEarned + examEarned;
+    const totalPossible = quizPossible + hwPossible + examPossible;
+    const points = {
+      total: {
+        earned: totalEarned,
+        possible: totalPossible,
+        percent: totalPossible > 0 ? Math.round((totalEarned / totalPossible) * 100) : 0,
+      },
+      quizzes: { earned: quizEarned, possible: quizPossible },
+      homeworks: { earned: hwEarned, possible: hwPossible },
+      exams: { earned: examEarned, possible: examPossible },
+    };
+
     res.json({
       user: {
         id: user.id,
@@ -91,6 +119,8 @@ export async function profile(req: AuthRequest, res: Response) {
       payments,
       lessons: lessonsOut,
       quizAttempts: attempts,
+      quizBestAttempts,
+      points,
       currentMonth,
       currentPayment: currentPayment ?? null,
     });

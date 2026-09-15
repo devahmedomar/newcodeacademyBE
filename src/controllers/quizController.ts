@@ -5,6 +5,8 @@ import { Lesson } from "../models/Lesson";
 import { AuthRequest } from "../middleware/auth";
 import { connectDB } from "../config/db";
 
+export const MAX_QUIZ_ATTEMPTS = 2;
+
 export async function getByLesson(req: AuthRequest, res: Response) {
   try {
     await connectDB();
@@ -12,9 +14,29 @@ export async function getByLesson(req: AuthRequest, res: Response) {
     if (!quiz) return res.status(404).json({ message: "This lesson has no quiz yet" });
 
     const isTeacher = req.user!.role === "teacher";
+
+    let attemptsLeft = MAX_QUIZ_ATTEMPTS;
+    let bestScore = 0;
+    let bestPercent = 0;
+    if (!isTeacher) {
+      const attempts = await QuizAttempt.find({ quizId: quiz.id, studentId: req.user!._id })
+        .select("score total percent")
+        .lean();
+      attemptsLeft = Math.max(0, MAX_QUIZ_ATTEMPTS - attempts.length);
+      for (const a of attempts) {
+        if (a.score > bestScore) {
+          bestScore = a.score;
+          bestPercent = a.percent;
+        }
+      }
+    }
+
     res.json({
       _id: quiz.id,
       lessonId: String(quiz.lessonId),
+      attemptsLeft,
+      bestScore,
+      bestPercent,
       questions: quiz.questions.map((q) =>
         isTeacher
           ? { question: q.question, options: q.options, correctIndex: q.correctIndex }
@@ -92,6 +114,12 @@ export async function submitAttempt(req: AuthRequest, res: Response) {
       return res.status(403).json({ message: "Quiz not available yet" });
     }
 
+    const studentId = req.user!._id;
+    const existing = await QuizAttempt.find({ quizId: quiz.id, studentId }).select("score percent");
+    if (existing.length >= MAX_QUIZ_ATTEMPTS) {
+      return res.status(403).json({ message: "No attempts left" });
+    }
+
     const { answers } = req.body;
     if (!Array.isArray(answers) || answers.length !== quiz.questions.length) {
       return res.status(400).json({ message: "Answer every question" });
@@ -117,14 +145,34 @@ export async function submitAttempt(req: AuthRequest, res: Response) {
 
     const attempt = await QuizAttempt.create({
       quizId: quiz.id,
-      studentId: req.user!._id,
+      studentId,
       score,
       total,
       percent,
       answers: results.map((r) => ({ question: r.question, chosen: r.chosen, correct: r.correctIndex })),
     });
 
-    res.status(201).json({ _id: attempt.id, quizId: quiz.id, score, total, percent, results });
+    let bestScore = score;
+    let bestPercent = percent;
+    for (const a of existing) {
+      if (a.score > bestScore) {
+        bestScore = a.score;
+        bestPercent = a.percent;
+      }
+    }
+    const attemptsLeft = Math.max(0, MAX_QUIZ_ATTEMPTS - (existing.length + 1));
+
+    res.status(201).json({
+      _id: attempt.id,
+      quizId: quiz.id,
+      score,
+      total,
+      percent,
+      attemptsLeft,
+      bestScore,
+      bestPercent,
+      results,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
