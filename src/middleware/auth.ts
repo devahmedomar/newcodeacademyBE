@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { User, IUser } from "../models/User";
+import { connectDB } from "../config/db";
 
 export interface AuthRequest extends Request {
   user?: IUser;
@@ -13,15 +14,23 @@ export async function authGuard(req: AuthRequest, res: Response, next: NextFunct
   }
 
   const token = header.slice(7);
+  let payload: { sub: string };
   try {
     const secret = process.env.JWT_SECRET || "dev-secret";
-    const payload = jwt.verify(token, secret) as { sub: string };
+    payload = jwt.verify(token, secret) as { sub: string };
+  } catch {
+    return res.status(401).json({ message: "Invalid or expired token" });
+  }
+
+  try {
+    await connectDB();
     const user = await User.findById(payload.sub);
     if (!user || !user.active) return res.status(401).json({ message: "User not found or inactive" });
     req.user = user;
     next();
-  } catch {
-    return res.status(401).json({ message: "Invalid or expired token" });
+  } catch (err) {
+    console.error("authGuard db error:", err);
+    return res.status(500).json({ message: "Server error" });
   }
 }
 
