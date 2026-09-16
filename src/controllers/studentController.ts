@@ -1,4 +1,5 @@
 import { Response } from "express";
+import bcrypt from "bcryptjs";
 import { AuthRequest } from "../middleware/auth";
 import { connectDB } from "../config/db";
 import { ExamGrade } from "../models/ExamGrade";
@@ -124,6 +125,70 @@ export async function profile(req: AuthRequest, res: Response) {
       currentMonth,
       currentPayment: currentPayment ?? null,
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+export async function changePassword(req: AuthRequest, res: Response) {
+  try {
+    await connectDB();
+    const { id } = req.params;
+    const { password } = req.body;
+    if (!password || password.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters" });
+    }
+
+    const user = await User.findById(id);
+    if (!user || user.role !== "student") {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    user.passwordHash = await bcrypt.hash(password, 10);
+    await user.save();
+    return res.json({ message: "Password updated" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+export async function remove(req: AuthRequest, res: Response) {
+  try {
+    await connectDB();
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user || user.role !== "student") {
+      return res.status(404).json({ message: "Student not found" });
+    }
+    if (!user.active) {
+      return res.status(400).json({ message: "Student is already deactivated" });
+    }
+
+    user.active = false;
+    await user.save();
+
+    return res.json({ message: "Student deactivated — all their data is kept" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+export async function restore(req: AuthRequest, res: Response) {
+  try {
+    await connectDB();
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user || user.role !== "student") {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    user.active = true;
+    await user.save();
+
+    return res.json({ message: "Student restored" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });

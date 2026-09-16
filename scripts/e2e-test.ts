@@ -120,6 +120,51 @@ async function main() {
   const unpaidList = await req("GET", "/api/payments", undefined, teacherToken);
   check("teacher payment list covers all", unpaidList.data.length === 2, JSON.stringify(unpaidList.data));
 
+  console.log("7. Password management");
+  const wrongCurrent = await req("PUT", "/auth/password", { currentPassword: "nope", newPassword: "newpass1" }, studentToken);
+  check("self change rejects wrong current password", wrongCurrent.status === 401);
+
+  const selfChange = await req("PUT", "/auth/password", { currentPassword: "student123", newPassword: "newpass1" }, studentToken);
+  check("student changes own password", selfChange.status === 200);
+
+  const relogin = await req("POST", "/auth/login", { email: "amina@student.com", password: "newpass1" });
+  check("student logs in with new password", relogin.status === 200);
+  const studentToken2: string = relogin.data.token;
+
+  const shortPass = await req("PUT", `/api/students/${studentId}/password`, { password: "123" }, teacherToken);
+  check("teacher reset rejects short password", shortPass.status === 400);
+
+  const reset = await req("PUT", `/api/students/${studentId}/password`, { password: "resetpass" }, teacherToken);
+  check("teacher resets student password", reset.status === 200);
+
+  const resetLogin = await req("POST", "/auth/login", { email: "amina@student.com", password: "resetpass" });
+  check("student logs in with reset password", resetLogin.status === 200);
+
+  const studentForbidReset = await req("PUT", `/api/students/${studentId}/password`, { password: "whatever1" }, studentToken2);
+  check("student cannot reset other accounts", studentForbidReset.status === 403);
+
+  const studentForbidDelete = await req("DELETE", `/api/students/${studentId}`, undefined, studentToken2);
+  check("student cannot delete accounts", studentForbidDelete.status === 403);
+
+  console.log("8. Teacher deletes student (soft delete keeps data)");
+  const del = await req("DELETE", `/api/students/${studentId}`, undefined, teacherToken);
+  check("teacher deactivates student", del.status === 200);
+
+  const del2 = await req("DELETE", `/api/students/${studentId}`, undefined, teacherToken);
+  check("deactivating again returns 400", del2.status === 400);
+
+  const keptProfile = await req("GET", `/api/students/${studentId}`, undefined, teacherToken);
+  check("deactivated student's data is kept", keptProfile.status === 200 && keptProfile.data.payments.length === 1);
+
+  const goneLogin = await req("POST", "/auth/login", { email: "amina@student.com", password: "resetpass" });
+  check("deactivated student cannot log in", goneLogin.status === 401);
+
+  const restoreRes = await req("PUT", `/api/students/${studentId}/restore`, undefined, teacherToken);
+  check("teacher restores student", restoreRes.status === 200);
+
+  const restoredLogin = await req("POST", "/auth/login", { email: "amina@student.com", password: "resetpass" });
+  check("restored student can log in", restoredLogin.status === 200);
+
   server.close();
   await mongod.stop();
 

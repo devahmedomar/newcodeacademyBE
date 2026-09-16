@@ -62,6 +62,32 @@ export async function register(req: AuthRequest, res: Response) {
   }
 }
 
+export async function changePassword(req: AuthRequest, res: Response) {
+  try {
+    await connectDB();
+
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "Current and new password required" });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters" });
+    }
+
+    const user = req.user!;
+    const ok = await user.comparePassword(currentPassword);
+    if (!ok) return res.status(401).json({ message: "Current password is incorrect" });
+
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    return res.json({ message: "Password updated" });
+  } catch (err) {
+    console.error("change password error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+}
+
 export async function me(req: AuthRequest, res: Response) {
   return res.json({
     user: {
