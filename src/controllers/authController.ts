@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { User } from "../models/User";
 import { AuthRequest } from "../middleware/auth";
 import { connectDB } from "../config/db";
-import { seedTeacher } from "../config/seed";
+import { seedTeacher, seedAnnouncements } from "../config/seed";
 
 const signToken = (id: string) =>
   jwt.sign({ sub: id }, process.env.JWT_SECRET || "dev-secret", { expiresIn: "7d" });
@@ -13,6 +13,7 @@ export async function login(req: Request, res: Response) {
   try {
     await connectDB();
     await seedTeacher();
+    await seedAnnouncements();
 
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: "Email and password required" });

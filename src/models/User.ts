@@ -8,6 +8,8 @@ export interface IUser extends Document {
   role: "student" | "teacher";
   enrollmentDate: Date;
   active: boolean;
+  avatar: string;
+  notifications: boolean;
   comparePassword(password: string): Promise<boolean>;
 }
 
@@ -19,6 +21,8 @@ const userSchema = new Schema<IUser>(
     role: { type: String, enum: ["student", "teacher"], default: "student" },
     enrollmentDate: { type: Date, default: Date.now },
     active: { type: Boolean, default: true },
+    avatar: { type: String, default: "" },
+    notifications: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

@@ -4,6 +4,7 @@ export interface IQuizQuestion {
   question: string;
   options: string[];
   correctIndex: number;
+  explanation?: string;
 }
 
 export interface IQuiz extends Document {
@@ -28,6 +29,7 @@ const quizSchema = new Schema<IQuiz>(
             },
           },
           correctIndex: { type: Number, required: true, min: 0 },
+          explanation: { type: String, trim: true },
         },
       ],
       required: true,

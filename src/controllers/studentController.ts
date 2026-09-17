@@ -114,6 +114,8 @@ export async function profile(req: AuthRequest, res: Response) {
         name: user.name,
         email: user.email,
         enrollmentDate: user.enrollmentDate,
+        avatar: user.avatar,
+        notifications: user.notifications,
       },
       exams,
       homeworks,

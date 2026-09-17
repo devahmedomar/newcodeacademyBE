@@ -60,13 +60,15 @@ export async function saveQuiz(req: AuthRequest, res: Response) {
       return res.status(400).json({ message: "Add at least one question" });
     }
 
-    const cleaned: Array<{ question: string; options: string[]; correctIndex: number }> = [];
+    const cleaned: Array<{ question: string; options: string[]; correctIndex: number; explanation?: string }> =
+      [];
     for (const [i, q] of questions.entries()) {
       const question = typeof q?.question === "string" ? q.question.trim() : "";
       const options = Array.isArray(q?.options)
         ? (q.options as unknown[]).map((o) => String(o).trim())
         : [];
       const correctIndex = Number(q?.correctIndex);
+      const explanation = typeof q?.explanation === "string" ? q.explanation.trim() : "";
 
       if (!question) return res.status(400).json({ message: `Question ${i + 1} needs a title` });
       if (options.length < 2 || options.length > 6 || options.some((o) => !o)) {
@@ -75,7 +77,7 @@ export async function saveQuiz(req: AuthRequest, res: Response) {
       if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex >= options.length) {
         return res.status(400).json({ message: `Question ${i + 1} has an invalid correct answer` });
       }
-      cleaned.push({ question, options, correctIndex });
+      cleaned.push({ question, options, correctIndex, explanation: explanation || undefined });
     }
 
     const quiz = await Quiz.findOneAndUpdate(
@@ -138,7 +140,13 @@ export async function submitAttempt(req: AuthRequest, res: Response) {
     const results = quiz.questions.map((q, i) => {
       const isCorrect = q.correctIndex === chosen[i];
       if (isCorrect) score++;
-      return { question: q.question, options: q.options, chosen: chosen[i], correctIndex: q.correctIndex };
+      return {
+        question: q.question,
+        options: q.options,
+        chosen: chosen[i],
+        correctIndex: q.correctIndex,
+        explanation: q.explanation,
+      };
     });
     const total = quiz.questions.length;
     const percent = Math.round((score / total) * 100);
@@ -173,6 +181,54 @@ export async function submitAttempt(req: AuthRequest, res: Response) {
       bestPercent,
       results,
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+export async function practice(req: AuthRequest, res: Response) {
+  try {
+    await connectDB();
+    const quiz = await Quiz.findById(req.params.quizId);
+    if (!quiz) return res.status(404).json({ message: "Quiz not found" });
+
+    const lesson = await Lesson.findById(quiz.lessonId);
+    if (!lesson || !lesson.published) {
+      return res.status(403).json({ message: "Quiz not available yet" });
+    }
+
+    const { answers } = req.body;
+    if (!Array.isArray(answers) || answers.length !== quiz.questions.length) {
+      return res.status(400).json({ message: "Answer every question" });
+    }
+
+    const chosen = answers.map((a) => Number(a));
+    for (let i = 0; i < quiz.questions.length; i++) {
+      const n = chosen[i];
+      const optionCount = quiz.questions[i].options.length;
+      if (!Number.isInteger(n) || n < 0 || n >= optionCount) {
+        return res.status(400).json({ message: `Invalid answer for question ${i + 1}` });
+      }
+    }
+
+    let score = 0;
+    const results = quiz.questions.map((q, i) => {
+      const isCorrect = q.correctIndex === chosen[i];
+      if (isCorrect) score++;
+      return {
+        question: q.question,
+        options: q.options,
+        chosen: chosen[i],
+        correctIndex: q.correctIndex,
+        correct: isCorrect,
+        explanation: q.explanation,
+      };
+    });
+    const total = quiz.questions.length;
+    const percent = Math.round((score / total) * 100);
+
+    res.json({ quizId: quiz.id, score, total, percent, results, practice: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
