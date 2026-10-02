@@ -1,4 +1,4 @@
-import { PDFParse } from "pdf-parse";
+import type { PDFParse as PDFParseType } from "pdf-parse";
 
 /**
  * PDF text extraction and chunk reassembly.
@@ -9,7 +9,39 @@ import { PDFParse } from "pdf-parse";
  *
  * Note: pdf-parse does no OCR. A scanned book yields empty pages, which is why
  * `assessExtraction` exists — the caller falls back to Gemini vision transcription.
+ *
+ * `pdf-parse` is imported lazily on purpose. It pulls in `pdfjs-dist`, which needs
+ * the native `@napi-rs/canvas` addon for its DOM polyfills. If that addon is missing
+ * for the platform (a Linux build without the binary, for example), a top-level
+ * import throws `ReferenceError: DOMMatrix is not defined` and takes the entire
+ * serverless function down — every route, not just book uploads. Loading it on
+ * first use confines a PDF failure to a 503 on the upload route.
  */
+
+type PDFParseCtor = new (opts: { data: Buffer }) => PDFParseType;
+
+let parserCtor: Promise<PDFParseCtor> | null = null;
+
+function loadParser(): Promise<PDFParseCtor> {
+  if (!parserCtor) {
+    parserCtor = import("pdf-parse").then(
+      (mod) => (mod as unknown as { PDFParse: PDFParseCtor }).PDFParse,
+      (err) => {
+        parserCtor = null;
+        throw new Error(
+          `PDF text extraction is unavailable on this platform: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    );
+  }
+  return parserCtor;
+}
+
+/** Cheap probe so `/health` can report a broken PDF stack without crashing. */
+export function isPdfEngineAvailable(): boolean {
+  return parserCtor !== null;
+}
+
 
 export const PDF_MAX_MB = Number(process.env.PDF_MAX_MB || 80);
 export const PDF_MAX_PAGES = Number(process.env.PDF_MAX_PAGES || 800);
@@ -82,6 +114,7 @@ export async function extractPages(
   assertPdf(buffer);
 
   const maxPages = opts.maxPages ?? PDF_MAX_PAGES;
+  const PDFParse = await loadParser();
   const parser = new PDFParse({ data: buffer });
 
   try {
