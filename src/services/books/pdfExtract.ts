@@ -10,20 +10,74 @@ import type { PDFParse as PDFParseType } from "pdf-parse";
  * Note: pdf-parse does no OCR. A scanned book yields empty pages, which is why
  * `assessExtraction` exists — the caller falls back to Gemini vision transcription.
  *
- * `pdf-parse` is imported lazily on purpose. It pulls in `pdfjs-dist`, which needs
- * the native `@napi-rs/canvas` addon for its DOM polyfills. If that addon is missing
- * for the platform (a Linux build without the binary, for example), a top-level
- * import throws `ReferenceError: DOMMatrix is not defined` and takes the entire
- * serverless function down — every route, not just book uploads. Loading it on
- * first use confines a PDF failure to a 503 on the upload route.
+ * `pdf-parse` is imported lazily on purpose. It pulls in `pdfjs-dist`, which reaches for
+ * the native `@napi-rs/canvas` addon to polyfill `DOMMatrix`/`ImageData`/`Path2D`. That
+ * addon is not installable on Vercel's serverless image, so pdfjs falls back to leaving
+ * those globals undefined and every extraction dies with
+ * `ReferenceError: DOMMatrix is not defined`. A top-level import would take the entire
+ * function down — every route, not just book uploads — so the import stays lazy, and
+ * `installDomPolyfills` below supplies the globals pdfjs checks for. Text extraction
+ * never rasterises, so inert shims are enough and the native addon is not needed.
  */
 
 type PDFParseCtor = new (opts: { data: Buffer }) => PDFParseType;
 
 let parserCtor: Promise<PDFParseCtor> | null = null;
+let polyfillsInstalled = false;
+
+/**
+ * Define the three DOM globals pdfjs probes for, before it is loaded.
+ *
+ * pdfjs only calls these during canvas rendering, which never happens on the
+ * text-extraction path, so presence is what matters — not fidelity.
+ */
+function installDomPolyfills(): void {
+  if (polyfillsInstalled) return;
+  polyfillsInstalled = true;
+
+  const scope = globalThis as unknown as Record<string, unknown>;
+
+  if (typeof scope.DOMMatrix === "undefined") {
+    scope.DOMMatrix = class DOMMatrix {
+      constructor(init?: Record<string, number>) {
+        Object.assign(this, init || {});
+      }
+      multiply() {
+        return this;
+      }
+      translate() {
+        return this;
+      }
+      scale() {
+        return this;
+      }
+    };
+  }
+  if (typeof scope.ImageData === "undefined") {
+    scope.ImageData = class ImageData {};
+  }
+  if (typeof scope.Path2D === "undefined") {
+    scope.Path2D = class Path2D {
+      constructor() {}
+      moveTo() {
+        return this;
+      }
+      lineTo() {
+        return this;
+      }
+      closePath() {
+        return this;
+      }
+    };
+  }
+  if (typeof scope.window === "undefined") {
+    scope.window = scope;
+  }
+}
 
 function loadParser(): Promise<PDFParseCtor> {
   if (!parserCtor) {
+    installDomPolyfills();
     parserCtor = import("pdf-parse").then(
       (mod) => (mod as unknown as { PDFParse: PDFParseCtor }).PDFParse,
       (err) => {
