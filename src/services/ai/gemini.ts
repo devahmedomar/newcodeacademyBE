@@ -1,11 +1,15 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import pRetry, { AbortError } from "p-retry";
 
 /**
  * Thin, retrying wrapper around the Gemini Developer API.
  *
- * Every call goes through `pRetry` with exponential backoff so the free tier's
+ * Every call retries with exponential backoff and jitter so the free tier's
  * 429/RPM/RPD limits degrade into a slow success rather than a user-facing error.
+ *
+ * The backoff is inlined rather than pulled from `p-retry`: that package is
+ * ESM-only, and this project compiles to CommonJS for Vercel, where `require()`
+ * of an ES module throws ERR_REQUIRE_ESM and kills the whole function. Inlining
+ * keeps the deployment clear of that failure mode and drops a dependency.
  */
 
 let cachedClient: GoogleGenAI | null = null;
@@ -47,50 +51,70 @@ function isRetryable(err: unknown): boolean {
   return /\b(429|500|502|503|504)\b|RESOURCE_EXSUMED|UNAVAILABLE|rate limit|overloaded/i.test(msg);
 }
 
-const RETRY_OPTS = {
-  retries: 5,
-  factor: 2,
-  minTimeout: 2_000,
-  maxTimeout: 45_000,
-  randomize: true,
-} as const;
+const RETRIES = 5;
+const BASE_DELAY_MS = 2_000;
+const MAX_DELAY_MS = 45_000;
+
+/**
+ * Exponential backoff with full jitter. Jitter matters here: several students
+ * hitting the same RPM limit would otherwise retry in lockstep and keep
+ * themselves throttled.
+ */
+function backoffDelay(attempt: number): number {
+  const ceiling = Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** (attempt - 1));
+  return Math.round(Math.random() * ceiling);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** An error flagged `retryable` still gives up immediately once it is not transient. */
+async function withRetry<T>(fn: (attempt: number) => Promise<T>): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= RETRIES + 1; attempt++) {
+    try {
+      return await fn(attempt);
+    } catch (err) {
+      lastError = err;
+
+      // Non-transient problems (bad key, malformed schema) must fail fast.
+      if (!isRetryable(err) && !(err as { retryable?: boolean })?.retryable) {
+        throw err;
+      }
+      if (attempt > RETRIES) break;
+
+      console.warn(
+        `[gemini] attempt ${attempt} failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+      await sleep(backoffDelay(attempt));
+    }
+  }
+
+  throw lastError;
+}
 
 async function call(
   parts: AiPart[],
   config: Record<string, unknown>
 ): Promise<string> {
   const ai = getClient();
-  return pRetry(
-    async () => {
-      const res = await ai.models.generateContent({
-        model: getModel(),
-        contents: parts,
-        config,
-      });
-      const text = res.text ?? "";
-      if (!text.trim()) {
-        // Empty output is usually a truncated/filtered response — worth one retry.
-        const err = new Error("Gemini returned an empty response") as Error & { retryable?: boolean };
-        err.retryable = true;
-        throw err;
-      }
-      return text;
-    },
-    {
-      ...RETRY_OPTS,
-      onFailedAttempt(err) {
-        if (!isRetryable(err) && !(err as { retryable?: boolean }).retryable) {
-          // Non-transient problems (bad key, malformed schema) must fail fast.
-          throw new AbortError(err instanceof Error ? err : new Error(String(err)));
-        }
-        console.warn(
-          `[gemini] attempt ${err.attemptNumber} failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        );
-      },
+  return withRetry(async () => {
+    const res = await ai.models.generateContent({
+      model: getModel(),
+      contents: parts,
+      config,
+    });
+    const text = res.text ?? "";
+    if (!text.trim()) {
+      // Empty output is usually a truncated/filtered response — worth one retry.
+      const err = new Error("Gemini returned an empty response") as Error & { retryable?: boolean };
+      err.retryable = true;
+      throw err;
     }
-  );
+    return text;
+  });
 }
 
 export interface StructuredOptions {
