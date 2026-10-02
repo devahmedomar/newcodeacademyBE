@@ -1,55 +1,30 @@
-import { Request, Response } from "express";
+import { Response } from "express";
+import { AuthRequest } from "../middleware/auth";
 import { User } from "../models/User";
-import { ExamGrade } from "../models/ExamGrade";
-import { ExamTemplate } from "../models/ExamTemplate";
-import { Homework } from "../models/Homework";
-import { QuizAttempt } from "../models/QuizAttempt";
+import { leaderboardBuckets, percentOf } from "../services/pointsService";
 import { connectDB } from "../config/db";
 
-export async function top(req: Request, res: Response) {
+/**
+ * This route is reachable without a login: the student portal's public landing
+ * page renders the top of the ranking as a marketing feature, and it loads before
+ * anyone signs in. So the payload has to be safe to hand to a stranger —
+ * anonymous callers get an initial instead of a name, and nobody gets a raw
+ * `_id` or a per-student `possible` total. A signed-in caller is a member of the
+ * same class and already sees these names in the roster, so they get them here
+ * too. See `optionalAuth` on the route.
+ */
+function maskName(name: string): string {
+  const first = name.trim().split(/\s+/)[0] ?? "";
+  const initial = Array.from(first)[0] ?? "";
+  return initial ? `${initial}.` : "•";
+}
+
+export async function top(req: AuthRequest, res: Response) {
   try {
     await connectDB();
     const limit = Math.min(Math.max(Number(req.query.limit) || 5, 1), 50);
 
-    const examTemplateColl = ExamTemplate.collection.name;
-    const examAgg = await ExamGrade.aggregate<{ _id: unknown; earned: number; possible: number }>([
-      { $lookup: { from: examTemplateColl, localField: "examId", foreignField: "_id", as: "tmpl" } },
-      { $unwind: "$tmpl" },
-      { $group: { _id: "$studentId", earned: { $sum: "$grade" }, possible: { $sum: "$tmpl.maxGrade" } } },
-    ]);
-    const homeworkAgg = await Homework.aggregate<{ _id: unknown; earned: number; possible: number }>([
-      { $group: { _id: "$studentId", earned: { $sum: "$points" }, possible: { $sum: "$maxPoints" } } },
-    ]);
-    const quizAgg = await QuizAttempt.aggregate<{
-      _id: unknown;
-      earned: number;
-      possible: number;
-    }>([
-      { $sort: { score: -1 } },
-      {
-        $group: {
-          _id: { studentId: "$studentId", quizId: "$quizId" },
-          score: { $first: "$score" },
-          total: { $first: "$total" },
-        },
-      },
-      { $group: { _id: "$_id.studentId", earned: { $sum: "$score" }, possible: { $sum: "$total" } } },
-    ]);
-
-    const acc = new Map<string, { earned: number; possible: number }>();
-    const add = (rows: Array<{ _id: unknown; earned: number; possible: number }>) => {
-      for (const r of rows) {
-        const key = String(r._id);
-        const cur = acc.get(key) ?? { earned: 0, possible: 0 };
-        cur.earned += r.earned;
-        cur.possible += r.possible;
-        acc.set(key, cur);
-      }
-    };
-    add(examAgg);
-    add(homeworkAgg);
-    add(quizAgg);
-
+    const acc = await leaderboardBuckets();
     const ids = [...acc.keys()];
     if (ids.length === 0) return res.json([]);
 
@@ -65,11 +40,18 @@ export async function top(req: Request, res: Response) {
           name: u.name,
           earned: p.earned,
           possible: p.possible,
-          percent: p.possible > 0 ? Math.round((p.earned / p.possible) * 100) : 0,
+          percent: percentOf(p),
         };
       })
+      // Sort on the real name, then mask: ordering by an initial would be unstable
+      // across students who share one.
       .sort((a, b) => b.earned - a.earned || b.percent - a.percent || a.name.localeCompare(b.name))
-      .slice(0, limit);
+      .slice(0, limit)
+      .map((r) => ({
+        name: req.user ? r.name : maskName(r.name),
+        earned: r.earned,
+        percent: r.percent,
+      }));
 
     res.json(rows);
   } catch (err) {

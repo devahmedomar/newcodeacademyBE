@@ -1,6 +1,8 @@
 import { Router } from "express";
 import announcementRoutes from "./announcements";
+import bookRoutes from "./book";
 import examRoutes from "./exam";
+import { examAttemptRoutes, examFormRoutes, examSetRoutes } from "./examSet";
 import homeworkRoutes from "./homework";
 import leaderboardRoutes from "./leaderboard";
 import lessonRoutes from "./lesson";
@@ -12,7 +14,11 @@ import studentRoutes from "./student";
 const router = Router();
 
 router.use("/announcements", announcementRoutes);
+router.use("/books", bookRoutes);
 router.use("/exams", examRoutes);
+router.use("/exam-sets", examSetRoutes);
+router.use("/exam-attempts", examAttemptRoutes);
+router.use("/exam-forms", examFormRoutes);
 router.use("/homework", homeworkRoutes);
 router.use("/leaderboard", leaderboardRoutes);
 router.use("/lessons", lessonRoutes);

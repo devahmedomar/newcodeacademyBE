@@ -42,6 +42,6 @@ const quizSchema = new Schema<IQuiz>(
   { timestamps: true }
 );
 
-quizSchema.index({ lessonId: 1 }, { unique: true });
-
+// Uniqueness is declared on the field above. Re-declaring it here produced a
+// duplicate-index warning on boot.
 export const Quiz = model<IQuiz>("Quiz", quizSchema);

@@ -5,10 +5,7 @@ import { connectDB } from "../config/db";
 import { WatchActivity } from "../models/WatchActivity";
 import { Lesson } from "../models/Lesson";
 import { QuizAttempt } from "../models/QuizAttempt";
-import { Homework } from "../models/Homework";
-import { ExamGrade } from "../models/ExamGrade";
-import { ExamTemplate } from "../models/ExamTemplate";
-import { User } from "../models/User";
+import { studentPoints } from "../services/pointsService";
 import { BADGES, levelFromPoints } from "../config/badges";
 
 export const WEEKLY_GOAL = 5;
@@ -146,33 +143,21 @@ export async function getBadges(req: AuthRequest, res: Response) {
     await connectDB();
     const studentId = String(req.user!._id);
 
-    const [activity, quizAttempts, homeworks, examGrades] = await Promise.all([
+    const [activity, quizAttempts, summary] = await Promise.all([
       buildActivity(studentId),
-      QuizAttempt.find({ studentId }).select("quizId score total percent").lean(),
-      Homework.find({ studentId }).select("points maxPoints").lean(),
-      ExamGrade.find({ studentId }).populate("examId").lean(),
+      QuizAttempt.find({ studentId }).select("percent").lean(),
+      studentPoints(studentId),
     ]);
 
-    const bestByQuiz = new Map<string, { score: number; total: number }>();
     let attemptCount = 0;
     let perfectQuiz = false;
     for (const a of quizAttempts) {
       attemptCount++;
       if (a.percent === 100) perfectQuiz = true;
-      const id = String(a.quizId);
-      const cur = bestByQuiz.get(id);
-      if (!cur || a.score > cur.score) bestByQuiz.set(id, { score: a.score, total: a.total });
     }
-    const quizEarned = [...bestByQuiz.values()].reduce((s, b) => s + b.score, 0);
-    const hwEarned = homeworks.reduce((s, h) => s + h.points, 0);
-    const examEarned = (examGrades as unknown as Array<{ grade: number; examId: any }>).reduce(
-      (s, e) => s + (e.examId ? e.grade : 0),
-      0
-    );
-    const pointsTotal = quizEarned + hwEarned + examEarned;
-    const highExam = (examGrades as unknown as Array<{ grade: number; examId: any }>).some(
-      (e) => e.examId && e.grade / e.examId.maxGrade >= 0.9
-    );
+
+    const pointsTotal = summary.total.earned;
+    const hwEarned = summary.homeworks.earned;
 
     const criteria: Record<string, boolean> = {
       first_video: activity.watchedLessons.length >= 1,
@@ -184,8 +169,10 @@ export async function getBadges(req: AuthRequest, res: Response) {
       points_250: pointsTotal >= 250,
       quiz_perfect: perfectQuiz,
       quiz_runner: attemptCount >= 5,
-      exam_90: highExam,
+      exam_90: summary.manualExamPercents.some((p) => p >= 90),
       homework_50: hwEarned >= 50,
+      ai_exam_90: summary.aiExamBests.some((b) => b.percent >= 90),
+      ai_exam_perfect: summary.aiExamBests.some((b) => b.percent >= 100),
     };
 
     const earned = BADGES.filter((b) => criteria[b.id]).map((b) => ({ ...b, earned: true }));

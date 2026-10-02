@@ -42,3 +42,23 @@ export function roleGuard(...roles: Array<"student" | "teacher">) {
     next();
   };
 }
+
+/**
+ * Attaches `req.user` when a valid token is present, and carries on when it is
+ * not. Unlike `authGuard` this never rejects, so it is only safe on routes whose
+ * response varies by caller rather than routes that gate data.
+ */
+export async function optionalAuth(req: AuthRequest, _res: Response, next: NextFunction) {
+  const header = req.headers.authorization;
+  if (header?.startsWith("Bearer ")) {
+    try {
+      const secret = process.env.JWT_SECRET || "dev-secret";
+      const payload = jwt.verify(header.slice(7), secret) as { sub: string };
+      const user = await User.findById(payload.sub).select("_id name role active");
+      if (user?.active) req.user = user;
+    } catch {
+      // A bad token is treated as no token: the caller gets the anonymous view.
+    }
+  }
+  next();
+}

@@ -4,7 +4,10 @@
     {
       "src": "api/index.ts",
       "use": "@vercel/node",
-      "config": { "includeFiles": ["src/**/*"] }
+      "config": {
+        "includeFiles": ["src/**/*"],
+        "maxDuration": 60
+      }
     }
   ],
   "routes": [

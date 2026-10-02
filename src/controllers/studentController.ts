@@ -9,6 +9,7 @@ import { Lesson } from "../models/Lesson";
 import { Quiz } from "../models/Quiz";
 import { QuizAttempt } from "../models/QuizAttempt";
 import { User } from "../models/User";
+import { percentOf, pointsForStudent } from "../services/pointsService";
 
 export async function profile(req: AuthRequest, res: Response) {
   try {
@@ -88,23 +89,12 @@ export async function profile(req: AuthRequest, res: Response) {
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
 
-    const quizEarned = quizBestAttempts.reduce((s, a) => s + a.score, 0);
-    const quizPossible = quizBestAttempts.reduce((s, a) => s + a.total, 0);
-    const hwEarned = homeworks.reduce((s, h) => s + h.points, 0);
-    const hwPossible = homeworks.reduce((s, h) => s + h.maxPoints, 0);
-    const examEarned = exams.reduce((s, e) => s + e.grade, 0);
-    const examPossible = exams.reduce((s, e) => s + e.maxGrade, 0);
-    const totalEarned = quizEarned + hwEarned + examEarned;
-    const totalPossible = quizPossible + hwPossible + examPossible;
+    // The buckets come from the shared points service so the profile, the leaderboard
+    // and the badges can never disagree about what a student has earned.
+    const buckets = await pointsForStudent(requestedId);
     const points = {
-      total: {
-        earned: totalEarned,
-        possible: totalPossible,
-        percent: totalPossible > 0 ? Math.round((totalEarned / totalPossible) * 100) : 0,
-      },
-      quizzes: { earned: quizEarned, possible: quizPossible },
-      homeworks: { earned: hwEarned, possible: hwPossible },
-      exams: { earned: examEarned, possible: examPossible },
+      ...buckets,
+      total: { ...buckets.total, percent: percentOf(buckets.total) },
     };
 
     res.json({

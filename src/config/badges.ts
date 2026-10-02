@@ -85,6 +85,24 @@ export const BADGES: BadgeDef[] = [
     title: { en: "Hard Worker", ar: "مجدّ" },
     description: { en: "Earn 50 homework points", ar: "احصد 50 نقطة واجبات" },
   },
+  {
+    id: "ai_exam_90",
+    icon: "🧠",
+    title: { en: "Exam Ace", ar: "عبقري الامتحانات" },
+    description: {
+      en: "Score 90%+ on a generated exam",
+      ar: "احصل على 90% فأكثر في امتحان مُولَّد",
+    },
+  },
+  {
+    id: "ai_exam_perfect",
+    icon: "💯",
+    title: { en: "Flawless", ar: "بلا عيوب" },
+    description: {
+      en: "Score 100% on a generated exam",
+      ar: "احصل على 100% في امتحان مُولَّد",
+    },
+  },
 ];
 
 export const LEVEL_STEP = 100;
